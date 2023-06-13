@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Datashader Tiling in Leaflet</title>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" crossorigin="anonymous"></script>
+
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
      crossorigin=""/>
@@ -18,16 +20,21 @@
     <div id="map"></div>
     <div id="sidebar">
         <p>
-            Coordinates: (<span id="lat-update">N/A</span>, <span id="lon-update">N/A</span>)</p>
-        <p id="temp-update"></p>
+            Coordinates: (<span id="lat-update">N/A</span>, <span id="lon-update">N/A</span>)
+        </p>
+        <p>
+            CESM2 Predicted 2023 Mean Surface Temperature: <span id="temp-update">N/A</span>
+        </p>
     </div>
 
     <script>
+        var socket = io();  // Create a WebSocket connection to the server
+
         var map = new L.map('map', {
             center: [30,0], 
             minZoom: 1,
             zoom: 2,
-            zoomSnap: 0,
+            zoomSnap: 1,
             maxBounds: [[-84, -Infinity],[84, Infinity]],
             maxBoundsViscosity: 1.0
         })
@@ -206,18 +213,28 @@
 
         
         map.on('mousemove', function(e) {
-            // console.log("Lat, Lon : " + e.latlng.lat + ", " + e.latlng.lng)
-            // console.log(L.CRS.EPSG3857.project(e.latlng))
-            document.getElementById('lat-update').innerHTML = (e.latlng.lat).toFixed(2) + "°" + (e.latlng.lat >= 0 ? 'N' : 'S');
-            document.getElementById('lon-update').innerHTML = (e.latlng.lng).toFixed(2) + "°" + (e.latlng.lng >= 0 ? 'E' : 'W');
+            socket.emit('mousemove', { lat: L.CRS.EPSG3857.project(e.latlng).y, lng: L.CRS.EPSG3857.project(e.latlng).y });  // Send coordinates to the server
+
+            let currentLat = e.latlng.lat
+            let currentLon = e.latlng.lng
+
+            // if (Math.abs(currentLon) > 180) {
+            //     // currentLon = -1 * (180 - (Math.abs(currentLon) % 180))
+            // }
+
+            document.getElementById('lat-update').innerHTML = (Math.abs(currentLat).toFixed(2)) + "°" + (currentLat >= 0 ? 'N' : 'S');
+            document.getElementById('lon-update').innerHTML = (Math.abs(currentLon).toFixed(2)) + "°" + (currentLon >= 0 ? 'E' : 'W');
         });
 
-        
-
+        // Listen for the 'updated_coordinates' event from the server
+        socket.on('updated_coordinates', function(temp) {
+            document.getElementById('temp-update').innerHTML = temp.toFixed(2) + "°C"
+        });
+    
         // debugging function
-        map.on('zoomend', function (e) {
-            console.log(e.target._zoom);
-        });
+        // map.on('zoomend', function (e) {
+        //     console.log(e.target._zoom);
+        // });
     </script>
   </body>
 </html>

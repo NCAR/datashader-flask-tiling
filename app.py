@@ -1,5 +1,6 @@
 # import libraries
 from flask import Flask, send_file, render_template
+from flask_socketio import SocketIO
 
 import io
 import math
@@ -22,6 +23,7 @@ max_val = float(data['TS'].max())
 # extract dimensions
 lon_array = data['x']
 lat_array = data['y']
+data_array = data['TS']
 
 def getDataValue(x, y):
     pass
@@ -74,6 +76,8 @@ def generateatile(zoom, x, y):
 
 app = Flask(__name__)
 
+socketio = SocketIO(app)
+
 @app.route("/")
 def index():
     return render_template('index.html')
@@ -88,5 +92,16 @@ def tile(x, y, zoom):
     results_bytes.seek(0)
     return send_file(results_bytes, mimetype='image/png')
 
+
+@socketio.on('mousemove')
+def handle_mousemove(coords):
+    # Process the coordinates received from the client
+    value = data_array.sel(x=coords['lng'], y=coords['lat'], method="nearest")
+    socketio.emit('updated_coordinates', float(value.values))  # Emit the queried value back to the client
+
 if __name__ == '__main__':
-   app.run(debug=True)
+    socketio.run(app)
+
+
+# if __name__ == '__main__':
+#    app.run(debug=True)
