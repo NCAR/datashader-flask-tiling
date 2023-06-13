@@ -1,6 +1,13 @@
+@font-face {
+    font-family: "Poppins Regular";
+    src: url("fonts/Poppins-Regular.ttf");
+}
+
 html, body {
     margin: 0;
     padding: 0;
+    font-family: "Poppins Regular";
+    color: white;
 }
 
 body {
@@ -11,9 +18,13 @@ body {
 #map {
     height: 100vh;
     width: 80%;
+    background-color: rgb(34, 34, 34);
 }
 
 #sidebar {
     height: 100vh;
     width: 20%;
+    background-color: rgb(34, 34, 34);
+    border-left: solid thin rgb(190, 190, 190);
+    padding: 1em;
 }
