@@ -1,6 +1,6 @@
 # import libraries
-from flask import Flask, send_file, render_template
-from flask_socketio import SocketIO
+from flask import Flask, send_file, render_template, jsonify, request
+# from flask_socketio import SocketIO
 
 import io
 import math
@@ -15,6 +15,7 @@ from datashader.utils import lnglat_to_meters
 
 # import dataset
 data = xr.open_dataset("static/data/TS2023_reproject.nc")
+time_data = xr.open_dataset("static/data/TS_annual_reproject.nc")
 
 # find min/max data values to set global colorbar
 min_val = float(data['TS'].min())
@@ -24,9 +25,7 @@ max_val = float(data['TS'].max())
 lon_array = data['x']
 lat_array = data['y']
 data_array = data['TS']
-
-def getDataValue(x, y):
-    pass
+time_data_array = time_data['TS']
 
 # following function from ScottSyms tileshade repo under the GNU General Public License v3.0.
 # https://github.com/ScottSyms/tileshade/
@@ -54,7 +53,7 @@ def generateatile(zoom, x, y):
     xleft, yleft = tile2mercator(int(x), int(y), int(zoom))
     xright, yright = tile2mercator(int(x)+1, int(y)+1, int(zoom))
 
-    # ensuring no gaps are left between tiles due to partitioning occuring between coordinates.
+    # ensuring no gaps are left between tiles due to partitioning occurring between coordinates.
     xleft_snapped = lon_array.sel(x=xleft, method="nearest").values
     yleft_snapped = lat_array.sel(y=yleft, method="nearest").values
     xright_snapped = lon_array.sel(x=xright, method="nearest").values
@@ -76,7 +75,7 @@ def generateatile(zoom, x, y):
 
 app = Flask(__name__)
 
-socketio = SocketIO(app)
+# socketio = SocketIO(app)
 
 @app.route("/")
 def index():
@@ -85,23 +84,36 @@ def index():
 @app.route("/tiles/<int:zoom>/<int:x>/<int:y>.png")
 def tile(x, y, zoom):
     results = generateatile(zoom, x, y)
-
     # image passed off to bytestream
     results_bytes = io.BytesIO()
     results.save(results_bytes, 'PNG')
     results_bytes.seek(0)
     return send_file(results_bytes, mimetype='image/png')
 
+@app.route('/time-series', methods=['POST'])
+def get_time_series():
+    request_data = request.get_json()
+    latitude = request_data['latitude']
+    longitude = request_data['longitude']
 
-@socketio.on('mousemove')
-def handle_mousemove(coords):
-    # Process the coordinates received from the client
-    value = data_array.sel(x=coords['lng'], y=coords['lat'], method="nearest")
-    socketio.emit('updated_coordinates', float(value.values))  # Emit the queried value back to the client
+    df_slice = time_data_array.sel(x=longitude, y=latitude, method="nearest")
+    df_slice = df_slice.to_dataframe().reset_index()[['year', 'TS']]
 
-if __name__ == '__main__':
-    socketio.run(app)
+    # convert the DataFrame to JSON
+    json_data = df_slice.to_json(orient='records')
+    
+    # send the JSON response
+    return jsonify(data=json_data)
 
+# @socketio.on('mousemove')
+# def handle_mousemove(coords):
+#     # process the coordinates received from the client
+#     value = data_array.sel(x=coords['lng'], y=coords['lat'], method="nearest")
+#     socketio.emit('updated_coordinates', float(value.values))  # Emit the queried value back to the client
 
 # if __name__ == '__main__':
-#    app.run(debug=True)
+#     socketio.run(app)
+
+
+if __name__ == '__main__':
+   app.run(debug=True)

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Datashader Tiling in Leaflet</title>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" crossorigin="anonymous"></script>
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" crossorigin="anonymous"></script> -->
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
@@ -15,6 +15,8 @@
      crossorigin=""></script>
 
      <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/site.css')}}">
+
+     <script src="https://d3js.org/d3.v7.min.js"></script>
   </head>
   <body>
     <div id="map"></div>
@@ -25,10 +27,11 @@
         <p>
             CESM2 Predicted 2023 Mean Surface Temperature: <span id="temp-update">N/A</span>
         </p>
+        <svg id="time-series-chart" height="350" width="350"></svg>
     </div>
 
     <script>
-        var socket = io();  // Create a WebSocket connection to the server
+        // var socket = io();  // Create a WebSocket connection to the server
 
         var map = new L.map('map', {
             center: [30,0], 
@@ -39,9 +42,9 @@
             maxBoundsViscosity: 1.0
         })
     
-        let initialZoom = Math.log2((window.innerHeight + 30) / 256)
-        map.setZoom(initialZoom)
-        map.setMinZoom(initialZoom);
+        // let initialZoom = Math.log2((window.innerHeight + 30) / 256)
+        // map.setZoom(initialZoom)
+        // map.setMinZoom(initialZoom);
 
         // basemap
         var CartoDB_DarkMatterNoLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
@@ -209,11 +212,9 @@
         //     maxZoom: 20
         // }).addTo(map);
 
-        // L.control.layers(basemap, mapdata).addTo(map);
-
-        
+        // handling hover functionalities
         map.on('mousemove', function(e) {
-            socket.emit('mousemove', { lat: L.CRS.EPSG3857.project(e.latlng).y, lng: L.CRS.EPSG3857.project(e.latlng).y });  // Send coordinates to the server
+            // socket.emit('mousemove', { lat: L.CRS.EPSG3857.project(e.latlng).y, lng: L.CRS.EPSG3857.project(e.latlng).x });  // Send coordinates to the server
 
             let currentLat = e.latlng.lat
             let currentLon = e.latlng.lng
@@ -226,15 +227,165 @@
             document.getElementById('lon-update').innerHTML = (Math.abs(currentLon).toFixed(2)) + "°" + (currentLon >= 0 ? 'E' : 'W');
         });
 
-        // Listen for the 'updated_coordinates' event from the server
-        socket.on('updated_coordinates', function(temp) {
-            document.getElementById('temp-update').innerHTML = temp.toFixed(2) + "°C"
-        });
+        
+
+        // listen for the 'updated_coordinates' event from the server
+        // socket.on('updated_coordinates', function(temp) {
+        //     document.getElementById('temp-update').innerHTML = temp.toFixed(2) + "°C"
+        // });
     
         // debugging function
         // map.on('zoomend', function (e) {
         //     console.log(e.target._zoom);
         // });
+    </script>
+
+    <script>
+        const svg = d3.select("svg#time-series-chart");
+        const width = svg.attr("width");
+        const height = svg.attr("height");
+        const margin = {top: 25, right: 15, bottom: 60, left: 70};
+        const chartWidth = width - margin.left - margin.right;
+        const chartHeight = height - margin.top - margin.bottom;
+
+        let currentYear = 2023;
+
+        let annotations = svg.append("g").attr("id","annotations"); 
+        let chartArea = svg.append("g").attr("id","points")
+                        .attr("transform",`translate(${margin.left},${margin.top})`);
+
+        map.on('click', function (e) {
+            annotations.selectAll("*").remove();
+            chartArea.selectAll("*").remove();
+            svg.selectAll(".label").remove();
+
+            let clickedCoords = e.latlng
+
+            let projectedCoords = L.CRS.EPSG3857.project(e.latlng)
+            let latitude = projectedCoords.y;
+            let longitude = projectedCoords.x;
+
+            // send coordinates to backend
+                fetch('/time-series', {
+                    method: 'POST',
+                    body: JSON.stringify({ latitude, longitude }),
+                    headers: {
+                    'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // call a function to process the received dataframe with d3.js and plot it
+                    data = JSON.parse(data.data)
+                    plotData(data, clickedCoords);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        });
+
+        function plotData(data, clickedCoords) {
+            // ensure data is of type Number
+            data.forEach( d => {
+                d['year'] = Number( d['year']);
+                d['TS'] = Number(d['TS']);
+            });
+
+            // construct scales for the x-axis and y-axis based on data range
+            const xDomain = d3.extent(data, d => d.year);
+            const yDomain = d3.extent(data, d => d.TS)
+            const timeScale = d3.scaleLinear().domain(xDomain).range([0, chartWidth]);
+            const dataScale = d3.scaleLinear().domain(yDomain).range([chartHeight, 0]);
+
+            // construct y-axis
+            let leftAxis = d3.axisLeft(dataScale)
+            let leftGridlines = d3.axisLeft(dataScale)
+                                  .tickSize(-chartWidth-10)
+                                  .tickFormat("");
+
+            annotations.append("g")
+                        .attr("class", "y axis")
+                        .attr("transform",`translate(${margin.left-10},${margin.top})`)
+                        .call(leftAxis);
+            annotations.append("g")
+                        .attr("class", "y gridlines")
+                        .attr("transform",`translate(${margin.left-10},${margin.top})`)
+                        .call(leftGridlines);
+
+            // construct x-axis
+            let bottomAxis = d3.axisBottom(timeScale).tickFormat(d3.format("d"))
+            let bottomGridlines = d3.axisBottom(timeScale)
+                                    .tickSize(-chartHeight-10)
+                                    .tickFormat("")
+            annotations.append("g")
+                        .attr("class", "x axis")
+                        .attr("transform",`translate(${margin.left},${chartHeight + margin.top+10})`)
+                        .call(bottomAxis)
+            annotations.append("g")
+                        .attr("class", "x gridlines")
+                        .attr("transform",`translate(${margin.left},${chartHeight + margin.top+10})`)
+                        .call(bottomGridlines);
+
+            // create plot title
+            annotations.append('text')
+                .attr("x", chartWidth / 2.0 + margin.left)
+                .attr("y", 15)
+                .attr("class", "title")
+                .style("font-size", "16px")
+                .style("text-anchor", "middle")
+                .style("fill", "white")
+                .text("Time Series for " + clickedCoords.lat.toFixed(2).toString() + ", " + clickedCoords.lng.toFixed(2).toString());
+            
+            // create y-axis label
+            svg.append("text")
+               .attr("class", "y-axis label")
+               .attr("x", -chartHeight/2.0 - 10)
+               .attr("y", 10)
+               .attr("transform", "rotate(-90)")
+               .style("font-size", "12px")
+               .style("text-anchor", "middle")
+               .style("fill", "white")
+               .text("Surface Temperature (C°)");
+
+            // create x-axis label
+            svg.append('text')
+                .attr("x", chartWidth / 2.0 + margin.left)
+                .attr("y", chartHeight + margin.bottom + 10)
+                .attr("class", "x-axis label")
+                .style("font-size", "12px")
+                .style("text-anchor", "middle")
+                .style("fill", "white")
+                .text("Year");
+
+            // construct line
+            chartArea.append("path")
+                .datum(data)
+                .attr("fill", "none")
+                .attr("stroke", "white")
+                .attr("stroke-width", 2)
+                .attr("d", d3.line()
+                    .x(function(d) { return (timeScale(d.year)) })
+                    .y(function(d) { return (dataScale(d.TS)) })
+                )
+            
+            // elevate plotted line above gridlines
+            chartArea.raise()
+
+            let selectedYearData = data.find(d => d.year === currentYear).TS
+            console.log(selectedYearData)
+
+            chartArea.append("circle")
+                     .attr("cx", timeScale(currentYear))
+                     .attr("cy", dataScale(selectedYearData))
+                     .attr("r", "6px")
+                     .style("fill", "gray")
+                     .style("stroke", "white")
+                     .style("stroke-width", 2)
+        }
+                
+        
+
+        
     </script>
   </body>
 </html>
